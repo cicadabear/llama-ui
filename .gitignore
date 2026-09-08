@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# build output
+build/
+.svelte-kit/
+dist/
+
+# logs
+*.log
+npm-debug.log*
+
+# env / local config
+.env
+.env.*
+
+# testing
+.playwright/
+test-results/
+coverage/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

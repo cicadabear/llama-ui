@@ -1,0 +1,12 @@
+node_modules
+build
+.svelte-kit
+.git
+.gitignore
+test-results
+dist
+dev-dist
+debug-storybook.log
+*.log
+Dockerfile
+.dockerignore
