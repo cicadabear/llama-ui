@@ -9,6 +9,7 @@
 import { getAudioInputFormat } from '../utils/audio-format';
 import { capImageDataURLSize } from '../utils/cap-img-size';
 import { recordSpeed, clearSpeed } from '$lib/hooks/speed-meter';
+import { getApiBase } from '../utils/api-base';
 import {
 	API_CHAT,
 	API_SLOTS,
@@ -826,6 +827,9 @@ export class ChatService {
 	 * conv::model identity when a model was bound at POST time.
 	 */
 	static async lookupStreamSessions(conversationIds: string[]): Promise<ApiStreamSession[]> {
+		// A configured external API base is an OpenAI-compatible endpoint with no
+		// llama.cpp resumable-stream protocol — don't probe /v1/streams/lookup.
+		if (getApiBase()) return [];
 		const resp = await fetch(API_STREAM.LOOKUP, {
 			body: JSON.stringify({ conversation_ids: conversationIds }),
 			headers: getJsonHeaders(),

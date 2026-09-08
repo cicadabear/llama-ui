@@ -22,13 +22,14 @@ so it builds and runs on its own via the included `Dockerfile`.
 | `src/lib/utils/api-base.ts` | **New.** Single source of truth for a runtime-configurable API base (read from `localStorage["llamaui.apiBase"]`, same-origin fallback). `resolveApiUrl()` **de-duplicates a trailing `/v1`** in the base. `persistApiBase()` writes the base **without a reload**; `setApiBase()` persists + reloads. |
 | `src/lib/constants/api-endpoints.constants.ts` | Every endpoint path is exposed as a **lazy getter** that calls `resolveApiUrl()` at access time (instead of a value baked at module init), so an endpoint change takes effect **without a page reload**. |
 | `src/lib/hooks/speed-meter.ts` | **New.** Client-side, backend-agnostic speed meter (Svelte store): `clearSpeed()` at stream start, `recordSpeed()` on completion. Derives TTFT + tok/s + token count from the browser clock + `usage.completion_tokens`. |
-| `src/lib/services/chat.service.ts` | Adds `stream_options.include_usage`; records first/last **token** times + count (content **and** reasoning, so reasoning models measure correctly); reads *thinking* from `delta.reasoning` (vllm 0.27.x) as a fallback for `reasoning_content`; clears any previous readout at stream start and records the **final sample only on completion**. |
+| `src/lib/services/chat.service.ts` | Adds `stream_options.include_usage`; records first/last **token** times + count (content **and** reasoning, so reasoning models measure correctly); reads *thinking* from `delta.reasoning` (vllm 0.27.x) as a fallback for `reasoning_content`; clears any previous readout at stream start and records the **final sample only on completion**. Also **skips the llama.cpp-only `/v1/streams/lookup` probe when an external (OpenAI-compatible) endpoint is set** (it 404s against vllm), keeping the console clean. |
+| `src/lib/stores/tools.svelte.ts` | **Skips the llama.cpp-only `/tools` (server-tools) fetch when an external (OpenAI-compatible) endpoint is set** (vllm has no `/tools`; the app's built-in client tools are unaffected), so it doesn't 404 in the console. |
 | `src/lib/components/app/SpeedMeter.svelte` | **New.** Compact `⚡ speed …` readout, rendered **on the assistant message** (appears once the reply completes — no live ticking, no corner readout). |
 | `src/lib/components/app/chat/.../ChatMessageAssistant.svelte` | Renders the per-message `SpeedMeter` on the last assistant message. |
 | `src/lib/components/app/settings/SettingsChat/SettingsChatApiEndpoint.svelte` | **New.** The **API endpoint** field in Settings → General. **Apply** persists the base (no reload) and lists the endpoint's models below the field, **first auto-selected**. |
 | `src/lib/stores/models/index.svelte.ts` | Auto-selects the **first** model once the list loads from the configured API. |
 | `src/routes/+layout.svelte` | Routes the `/props` capability probe through the configured base. |
-| `Dockerfile`, `server.mjs`, `.dockerignore` | **New.** Two-stage build (`npm ci` + `vite build`) + a dependency-free static server that answers API-looking paths with a clean JSON 404 (not `index.html`). |
+| `Dockerfile`, `server.mjs`, `.dockerignore` | **New.** Two-stage build (`npm ci` + `vite build`) + a dependency-free static server that answers the startup probe paths (`/props`, `/tools`, `/v1/models`, `/v1/streams/lookup`) with a **valid-but-empty 200** (other API paths get a clean JSON 404), so a not-yet-configured same-origin origin stays quiet in the console. |
 | `README.md` | Replaced with the project README (build/run + how to read the speed + measured results). |
 
 ### Why a client-side speed meter
@@ -40,6 +41,13 @@ server (vllm) does not send them, so the built-in meter stays blank. The new
 client-side `SpeedMeter` derives TTFT/tok/s from the browser clock and the
 standard `usage.completion_tokens`, which vllm does send — so it works against
 any OpenAI endpoint.
+
+### Keeping the console clean against OpenAI/vllm backends
+
+The stock UI probes several **llama.cpp-only** endpoints on startup and on every send — `/props`, `/tools`, and the resumable-stream `/v1/streams/lookup`. A plain OpenAI-compatible backend (vllm) has none of these, so each probe returns a 404 and the console fills with "Failed to load resource: 404" plus app error logs. The app degrades gracefully to basic "model mode" (chat + speed still work), but the noise looks alarming. Two small changes keep the console clean without changing behavior:
+
+- `server.mjs` answers the **same-origin** probe paths with a **valid-but-empty 200** (e.g. `/props` → `{}`, `/v1/models` → `{"data": []}`), so a not-yet-configured origin is quiet.
+- With an **external** endpoint configured, the app **skips** the llama.cpp-only `/tools` and `/v1/streams/lookup` probes (a vllm/OpenAI endpoint has neither). The OpenAI-standard calls — `/v1/models` and `/v1/chat/completions` — still go to the configured endpoint as before.
 
 ### Known cosmetic caveat
 

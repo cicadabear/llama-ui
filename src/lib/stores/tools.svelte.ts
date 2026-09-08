@@ -27,6 +27,7 @@ import {
 	ToolSource
 } from '$lib/enums';
 import { ToolsService } from '$lib/services/tools.service';
+import { getApiBase } from '$lib/utils/api-base';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { mcpStore } from '$lib/stores/mcp/index.svelte';
 import { modelsStore } from '$lib/stores/models/index.svelte';
@@ -232,6 +233,11 @@ class ToolsStore {
 	}
 
 	async fetchServerTools(): Promise<void> {
+		// A configured external API base is an OpenAI-compatible endpoint (vllm,
+		// LM Studio, ...) with no llama.cpp /tools endpoint — skip the probe so it
+		// doesn't 404 in the console. With no base (same-origin llama.cpp server)
+		// the probe runs as before.
+		if (getApiBase()) return;
 		if (this._loading) return;
 
 		this._loading = true;

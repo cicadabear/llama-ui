@@ -43,6 +43,28 @@ const MIME = {
 // "Unexpected token '<' ... is not valid JSON". A clean 404 is far clearer.
 const API_PATH = /^\/(v1\/|props$|props\/|slots$|slots\/|tools$|tools\/|stream\/|api\/|cors-proxy)/;
 
+// The startup probe endpoints the UI always hits. When no external API base is
+// configured (bare same-origin deploy) we answer these with a valid-but-empty 200
+// instead of a 404, so the console stays quiet; with a base configured the UI
+// targets that base directly and never asks us for these. Returns null for any
+// other API path, which still gets a clean JSON 404.
+function emptyApiPayload(pathname) {
+	switch (pathname) {
+		case '/props':
+			return JSON.stringify({});
+		case '/tools':
+			return JSON.stringify([]);
+		case '/v1/models':
+			return JSON.stringify({ object: 'list', data: [] });
+		case '/v1/streams/lookup':
+			return JSON.stringify([]);
+		case '/v1/stream':
+			return JSON.stringify([]);
+		default:
+			return null;
+	}
+}
+
 async function resolve(pathname) {
 	const filePath = normalize(join(ROOT, decodeURIComponent(pathname)));
 	if (!filePath.startsWith(ROOT)) return { status: 403, type: 'text/plain', body: 'forbidden' };
@@ -54,6 +76,8 @@ async function resolve(pathname) {
 	} catch {
 		// not a real file on disk:
 		if (API_PATH.test(pathname)) {
+			const empty = emptyApiPayload(pathname);
+			if (empty !== null) return { status: 200, type: 'application/json', body: empty };
 			return {
 				status: 404,
 				type: 'application/json',
