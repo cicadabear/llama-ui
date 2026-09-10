@@ -14,6 +14,7 @@
 		NUMERIC_FIELDS,
 		POSITIVE_INTEGER_FIELDS,
 		SETTINGS_CHAT_SECTIONS,
+		SETTINGS_KEYS,
 		SETTINGS_SECTION_SLUGS
 	} from '$lib/constants';
 	import { ColorMode } from '$lib/enums/ui.enums';
@@ -95,7 +96,10 @@
 			}
 		}
 
+		// The API key is owned by the endpoint panel (direct store writes);
+		// exclude it from the bulk Save so it cannot be clobbered.
 		const processedConfig = { ...localConfig };
+		delete (processedConfig as Record<string, unknown>)[SETTINGS_KEYS.API_KEY];
 
 		for (const field of NUMERIC_FIELDS) {
 			if (processedConfig[field] !== undefined && processedConfig[field] !== '') {

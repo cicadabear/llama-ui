@@ -26,7 +26,9 @@ so it builds and runs on its own via the included `Dockerfile`.
 | `src/lib/stores/tools.svelte.ts` | **Skips the llama.cpp-only `/tools` (server-tools) fetch when an external (OpenAI-compatible) endpoint is set** (vllm has no `/tools`; the app's built-in client tools are unaffected), so it doesn't 404 in the console. |
 | `src/lib/components/app/SpeedMeter.svelte` | **New.** Compact `⚡ speed …` readout, rendered **on the assistant message** (appears once the reply completes — no live ticking, no corner readout). |
 | `src/lib/components/app/chat/.../ChatMessageAssistant.svelte` | Renders the per-message `SpeedMeter` on the last assistant message. |
-| `src/lib/components/app/settings/SettingsChat/SettingsChatApiEndpoint.svelte` | **New.** The **API endpoint** field in Settings → General. **Apply** persists the base (no reload) and lists the endpoint's models below the field, **first auto-selected**. |
+| `src/lib/components/app/settings/SettingsChat/SettingsChatApiEndpoint.svelte` | **New.** The **API endpoint** field in Settings → General. **Apply** persists the base (no reload) and lists the endpoint's models below the field, **first auto-selected**. It also hosts a masked **API key** field (password + show/hide eye) for endpoints that require one — see *API key* below. |
+| `src/lib/constants/settings.constants.ts` | Marks the **API key** entry `standaloneField: false` so it no longer appears as a standalone field in the General list (the endpoint panel renders it instead), and gives the entry a backend-agnostic, privacy-aware help string. |
+| `src/lib/components/app/settings/SettingsChat/SettingsChat.svelte` | Excludes `apiKey` from the bulk **Save** write: the endpoint panel is the key's sole owner (it writes straight to the store), so a stale snapshot taken by the Save button can never clobber it. |
 | `src/lib/stores/models/index.svelte.ts` | Auto-selects the **first** model once the list loads from the configured API. |
 | `src/routes/+layout.svelte` | Routes the `/props` capability probe through the configured base. |
 | `Dockerfile`, `server.mjs`, `.dockerignore` | **New.** Two-stage build (`npm ci` + `vite build`) + a dependency-free static server that answers the startup probe paths (`/props`, `/tools`, `/v1/models`, `/v1/streams/lookup`) with a **valid-but-empty 200** (other API paths get a clean JSON 404), so a not-yet-configured same-origin origin stays quiet in the console. |
@@ -48,6 +50,24 @@ The stock UI probes several **llama.cpp-only** endpoints on startup and on every
 
 - `server.mjs` answers the **same-origin** probe paths with a **valid-but-empty 200** (e.g. `/props` → `{}`, `/v1/models` → `{"data": []}`), so a not-yet-configured origin is quiet.
 - With an **external** endpoint configured, the app **skips** the llama.cpp-only `/tools` and `/v1/streams/lookup` probes (a vllm/OpenAI endpoint has neither). The OpenAI-standard calls — `/v1/models` and `/v1/chat/completions` — still go to the configured endpoint as before.
+
+### API key (optional, for endpoints that require one)
+
+The stock UI already sends the configured API key as `Authorization: Bearer <key>`
+(`getAuthHeaders()`), redacts it from logs/headers, and keeps it out of settings
+exports — but the field lived in the **General** list, far from the endpoint it
+authenticates. These changes re-home it next to the endpoint:
+
+- The endpoint panel gains a masked **API key (optional)** input — a **password**
+  field with a **show/hide** (eye) toggle — placed directly under the endpoint.
+  It is **masked by default** and auto-saved to `localStorage` on every keystroke,
+  so it persists across reloads without touching the (unrelated) Save button.
+- The key is sent as `Authorization: Bearer <key>` on the OpenAI-standard calls
+  (`/v1/models`, `/v1/chat/completions`) — the same headers the stock UI already
+  built, so no new auth scheme was introduced.
+- It stays **private by design**: stored only in this browser's `localStorage`,
+  **never included in settings exports**, and **redacted from logs/headers**
+  (the stock `REDACTED` set already covered `authorization`/`api-key`).
 
 ### Known cosmetic caveat
 

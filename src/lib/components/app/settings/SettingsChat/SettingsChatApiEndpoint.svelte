@@ -1,8 +1,10 @@
 <script lang="ts">
+	import { Eye, EyeOff } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import Label from '$lib/components/ui/label/label.svelte';
-	import { modelsStore } from '$lib/stores';
+	import { ICON_CLASS_DEFAULT, SETTINGS_KEYS } from '$lib/constants';
+	import { modelsStore, settingsStore } from '$lib/stores';
 	import { getApiBase, persistApiBase } from '$lib/utils/api-base';
 
 	// Seeded from the remembered endpoint (localStorage). Changes are committed
@@ -16,6 +18,35 @@
 	const models = $derived(modelsStore.models);
 	const selectedId = $derived(modelsStore.selectedModelId);
 
+	// ── API key ────────────────────────────────────────────────────────────
+	// The key lives in the settings store (config.apiKey) so getAuthHeaders()
+	// sends it as `Authorization: Bearer <key>` on every request (chat, stream,
+	// models). Masked by default; the eye button reveals it temporarily.
+	// Auto-saved to this browser's localStorage whenever it changes.
+	//
+	// NOTE: this field is the sole owner of config.apiKey. The settings
+	// "Save" button (SettingsChat.handleSave) excludes apiKey from its
+	// bulk write so it cannot clobber what is typed here.
+	let key = $state(
+		(settingsStore.config[SETTINGS_KEYS.API_KEY] as string | undefined) ?? ''
+	);
+	let showKey = $state(false);
+
+	function toggleKeyVisibility() {
+		showKey = !showKey;
+	}
+
+	// Push the typed key to the store (and localStorage) when it diverges.
+	$effect(() => {
+		const storeKey =
+			(settingsStore.config[SETTINGS_KEYS.API_KEY] as string | undefined) ?? '';
+		const next = key.trim();
+		if (storeKey !== next) {
+			settingsStore.updateConfig(SETTINGS_KEYS.API_KEY, next);
+		}
+	});
+
+	// ── endpoint ───────────────────────────────────────────────────────────
 	async function apply() {
 		const v = value.trim();
 		busy = true;
@@ -69,6 +100,41 @@
 		automatically. The browser calls it directly, so it must allow cross-origin
 		requests (CORS). Leave empty to use the same origin as this page.
 	</p>
+
+	<!-- API key: masked by default, eye button to reveal -->
+	<div class="mt-3 space-y-1.5 border-t border-border/40 pt-3">
+		<Label for="api-key" class="font-medium">
+			API key <span class="font-normal text-muted-foreground">(optional)</span>
+		</Label>
+		<div class="relative">
+			<Input
+				id="api-key"
+				bind:value={key}
+				type={showKey ? 'text' : 'password'}
+				autocomplete="new-password"
+				placeholder="Bearer key (if your endpoint requires one)"
+				class="pr-9 font-mono text-sm"
+			/>
+			<button
+				type="button"
+				aria-label={showKey ? 'Hide API key' : 'Show API key'}
+				class="absolute top-1/2 right-2.5 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+				onclick={toggleKeyVisibility}
+			>
+				{#if showKey}
+					<EyeOff class={ICON_CLASS_DEFAULT} />
+				{:else}
+					<Eye class={ICON_CLASS_DEFAULT} />
+				{/if}
+			</button>
+		</div>
+		<p class="text-xs text-muted-foreground">
+			Sent as <code>Authorization: Bearer &lt;key&gt;</code>. Stored only in this
+			browser (localStorage); it is never included in settings exports and is
+			redacted from logs.
+		</p>
+	</div>
+
 	<div class="flex items-center justify-end gap-2">
 		<Button type="button" variant="outline" disabled={busy} onclick={clear}>Clear</Button>
 		<Button type="button" disabled={busy} onclick={apply}>{busy ? 'Applying…' : 'Apply'}</Button>
@@ -94,7 +160,9 @@
 								onchange={() => pick(m.id)}
 							/>
 							<span class="flex-1 truncate">{m.name || m.model}</span>
-							{#if i === 0}<span class="text-[10px] uppercase text-muted-foreground">first</span>{/if}
+							{#if i === 0}
+								<span class="text-[10px] uppercase text-muted-foreground">first</span>
+							{/if}
 						</label>
 					</li>
 				{/each}
@@ -103,7 +171,9 @@
 	{/if}
 
 	{#if status}
-		<p class="text-xs {status.startsWith('Could not') || status.startsWith('Connected, but') ? 'text-destructive' : 'text-muted-foreground'}">
+		<p
+			class="text-xs {status.startsWith('Could not') || status.startsWith('Connected, but') ? 'text-destructive' : 'text-muted-foreground'}"
+		>
 			{status}
 		</p>
 	{/if}

@@ -74,8 +74,14 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				type: SettingsFieldType.SELECT
 			},
 			{
+				// No standalone field in the General list: the API key is rendered
+				// by the API endpoint panel (SettingsChatApiEndpoint), where it
+				// belongs alongside the endpoint it authenticates. `standaloneField:
+				// false` keeps it out of the auto-listed fields while preserving its
+				// default ('' so the store initializes apiKey) and its type.
+				standaloneField: false,
 				defaultValue: '',
-				help: `Set the API Key if you are using <code> ${CLI_FLAGS.API_KEY} </code> option for the server.`,
+				help: `Set the API key if your endpoint requires one. It is sent as <code>Authorization: Bearer &lt;key&gt;</code>, stored only in this browser, and redacted from logs and exports.`,
 				isPrivate: true,
 				key: SETTINGS_KEYS.API_KEY,
 				label: 'API Key',
