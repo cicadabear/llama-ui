@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BookOpenText, Clock, Gauge, Layers, Sparkles, WholeWord, Wrench } from '@lucide/svelte';
+	import { BookOpenText, Clock, Gauge, Layers, Sparkles, WholeWord, Wrench, Zap } from '@lucide/svelte';
 	import { ChatMessageStatisticsBadge } from '$lib/components/app';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { DEFAULT_PERFORMANCE_TIME, MS_PER_SECOND } from '$lib/constants';
@@ -13,6 +13,8 @@
 		predictedMs?: number;
 		promptTokens?: number;
 		promptMs?: number;
+		/** time to first output token, ms — shown as its own badge regardless of view */
+		ttftMs?: number | null;
 		isLive?: boolean;
 		isProcessingPrompt?: boolean;
 		initialView?: ChatMessageStatsView;
@@ -33,7 +35,8 @@
 		predictedMs,
 		predictedTokens,
 		promptMs,
-		promptTokens
+		promptTokens,
+		ttftMs
 	}: Props = $props();
 
 	let isSwitchable = $derived(mode === ChatMessageStatisticsMode.SWITCHABLE);
@@ -287,6 +290,15 @@
 				icon={Gauge}
 				tooltipLabel="Prompt processing speed"
 				value="{promptTokensPerSecond!.toFixed(2)} tokens/s"
+			/>
+		{/if}
+
+		{#if ttftMs}
+			<ChatMessageStatisticsBadge
+				class="bg-transparent"
+				icon={Zap}
+				tooltipLabel="Time to first token (TTFT)"
+				value="TTFT {formatPerformanceTime(ttftMs)}"
 			/>
 		{/if}
 	</div>

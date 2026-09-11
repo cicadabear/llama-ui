@@ -383,6 +383,7 @@
 									class="min-w-0 overflow-hidden"
 									hideOrgName={!showOrgNameInTrigger}
 									hideQuantization
+									modalities={selectedOption.modalities}
 									modelId={selectedOption.model}
 								/>
 							{/if}

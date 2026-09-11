@@ -9,6 +9,7 @@
  * Uses ChatService for the API layer and conversationsStore for persistence.
  */
 
+import { speedToTimings } from '$lib/hooks/speed-meter';
 import { CWD_CLEARED_TEXT, SYSTEM_MESSAGE_PLACEHOLDER, TITLE_GENERATION } from '$lib/constants';
 import {
 	ErrorDialogType,
@@ -958,10 +959,15 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				timings: ChatMessageTimings | undefined,
 				toolCalls: import('$lib/types/api').ApiChatCompletionToolCall[] | undefined
 			) => {
+				// OpenAI-compatible endpoints (vllm, LM Studio) do not emit timings
+				// in the stream; fall back to the client-side measurement so the
+				// user message's prefill (reading) stats still have data to show.
+				const effectiveTimings = timings ?? speedToTimings();
+
 				const updateData: Record<string, unknown> = {
 					content,
 					reasoningContent: reasoningContent || undefined,
-					timings,
+					timings: effectiveTimings,
 					toolCalls: toolCalls ? JSON.stringify(toolCalls) : ''
 				};
 
@@ -975,7 +981,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 					toolCalls: toolCalls ? JSON.stringify(toolCalls) : ''
 				};
 
-				if (timings) uiUpdate.timings = timings;
+				if (effectiveTimings) uiUpdate.timings = effectiveTimings;
 
 				if (resolvedModel) uiUpdate.model = resolvedModel;
 
@@ -1172,10 +1178,12 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 				) => {
 					const content = streamedContent || finalContent || '';
 					const reasoning = streamedReasoningContent || reasoningContent;
+					// client-side fallback when the backend emitted no timings (vllm)
+					const effectiveTimings = timings ?? speedToTimings();
 					const updateData: Record<string, unknown> = {
 						content,
 						reasoningContent: reasoning || undefined,
-						timings,
+						timings: effectiveTimings,
 						toolCalls: toolCalls || ''
 					};
 
@@ -1189,7 +1197,7 @@ class ChatStore implements ChatStreamHost, ChatFlowsHost {
 						toolCalls: toolCalls || ''
 					};
 
-					if (timings) uiUpdate.timings = timings;
+					if (effectiveTimings) uiUpdate.timings = effectiveTimings;
 
 					if (resolvedModel) uiUpdate.model = resolvedModel;
 

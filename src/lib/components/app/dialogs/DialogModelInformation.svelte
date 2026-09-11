@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ActionIconCopyToClipboard, BadgesModality } from '$lib/components/app';
+	import { speed$ } from '$lib/hooks/speed-meter';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Table from '$lib/components/ui/table';
 	import { modelsStore, serverStore } from '$lib/stores';
@@ -21,10 +22,31 @@
 	let routerModelProps = $state<ApiLlamaCppServerProps | null>(null);
 	let isLoadingRouterProps = $state(false);
 
-	// in router mode use per-model props, otherwise use global props
-	let serverProps = $derived(isRouter && modelId ? routerModelProps : serverStore.props);
+	// in router mode use per-model props, otherwise use global props.
+	//
+	// A real llama.cpp `/props` response always carries `model_path`. When the
+	// page is served by the standalone static server it answers `/props` with an
+	// empty `{}`, and an OpenAI-compatible backend (e.g. vllm) has no `/props`
+	// at all — both yield props without `model_path`. Treat those as "no props"
+	// so the dialog shows the model-entry table (modalities, context, caps)
+	// instead of a table full of empty llama.cpp rows.
+	function hasLlamaCppProps(props: ApiLlamaCppServerProps | null): boolean {
+		if (!props) return false;
 
-	let modelName = $derived(isRouter && modelId ? modelId : modelsStore.singleModelName);
+		if (props.model_path) return true;
+
+		// the router's per-model props can legitimately describe a model without
+		// a local path; keep it when this is a real router-mode fetch
+		return isRouter && (props.total_slots != null || props.build_info || props.chat_template);
+	}
+
+	// in router mode use per-model props, otherwise use global props
+	let serverProps = $derived.by(() => {
+		const raw = isRouter && modelId ? routerModelProps : serverStore.props;
+
+		return hasLlamaCppProps(raw) ? raw : null;
+	});
+
 	let models = $derived(modelsStore.models);
 	let isLoadingModels = $derived(modelsStore.loading);
 
@@ -38,11 +60,59 @@
 		return models[0] ?? null;
 	});
 
+	// Human-friendly name: prefer the API's display name (e.g. vllm), else the
+	// parsed display name, else the raw id.
+	let modelName = $derived(
+		firstModel?.displayName?.trim() || firstModel?.name || firstModel?.id || (isRouter && modelId ? modelId : null)
+	);
+
 	// Get modalities from modelStore using the model ID from the first model
 	let modalities = $derived.by(() => {
 		if (!firstModel?.id) return [];
 
 		return modelsStore.props.getModelModalitiesArray(firstModel.id);
+	});
+
+	// Context window: /props n_ctx (llama.cpp) else the model entry's max_model_len
+	// (OpenAI-compatible backends such as vllm).
+	let contextSize = $derived.by(() => {
+		if (!firstModel) return null;
+
+		return modelsStore.props.getModelContextSize(firstModel.id);
+	});
+
+	// Performance of the most recent response, measured client-side so it works
+	// against any backend (vllm/OpenAI as well as llama.cpp). Sourced from the
+	// speed-meter store which the stream handler records for every completion.
+	// Prefill = the prompt-processing phase before the first output token.
+	let lastSpeed = $derived.by(() => {
+		const s = $speed$;
+
+		if (!s) return null;
+
+		const ttft = s.ttftMs;
+		const prefillSpeed =
+			s.promptTokens && ttft ? s.promptTokens / (ttft / 1000) : s.prefillTokPerSec;
+
+		return {
+			prefillMs: ttft ? Math.round(ttft) : null,
+			prefillSpeed: prefillSpeed ? Math.round(prefillSpeed) : null,
+			promptTokens: s.promptTokens ?? null,
+			outputTokens: s.tokens ?? null,
+			genSpeed: s.genTokPerSec ? Math.round(s.genTokPerSec) : null
+		};
+	});
+
+	// Feature capabilities the API entry advertises (e.g. vllm's
+	// {vision, tools, reasoning}); llama.cpp entries leave this empty.
+	let capabilities = $derived.by(() => {
+		const caps = firstModel?.openaiCapabilities;
+
+		if (!caps) return [];
+
+		return Object.entries(caps)
+			.filter(([, on]) => on)
+			.map(([key]) => ({ key, label: capabilityLabel(key) }));
 	});
 
 	// Ensure models are fetched when dialog opens
@@ -73,6 +143,27 @@
 			routerModelProps = null;
 		}
 	});
+
+	/** Human-friendly label for a capability key advertised by the API entry. */
+	function capabilityLabel(key: string): string {
+		switch (key.toLowerCase()) {
+			case 'vision':
+				return 'Vision';
+			case 'reasoning':
+				return 'Reasoning';
+			case 'tools':
+			case 'tool_calling':
+				return 'Tool calling';
+			case 'functions':
+				return 'Function calling';
+			case 'audio':
+				return 'Audio input';
+			case 'video':
+				return 'Video input';
+			default:
+				return key.charAt(0).toUpperCase() + key.slice(1);
+		}
+	}
 </script>
 
 <Dialog.Root bind:open {onOpenChange}>
@@ -97,7 +188,7 @@
 				{@const modelMeta = firstModel.meta}
 
 				{#if serverProps}
-					<!-- Desktop: fixed-layout table, long values scroll inside their cell -->
+					<!-- llama.cpp: full detail table from /props -->
 					<Table.Root class="hidden table-fixed md:table">
 						<Table.Header>
 							<Table.Row>
@@ -139,13 +230,11 @@
 							</Table.Row>
 
 							<!-- Context Size -->
-							{#if serverProps?.default_generation_settings?.n_ctx}
+							{#if contextSize !== null}
 								<Table.Row>
 									<Table.Cell class="h-10 align-middle font-medium">Context Size</Table.Cell>
 
-									<Table.Cell
-										>{formatNumber(serverProps.default_generation_settings.n_ctx)} tokens</Table.Cell
-									>
+									<Table.Cell>{formatNumber(contextSize)} tokens</Table.Cell>
 								</Table.Row>
 							{:else}
 								<Table.Row>
@@ -289,11 +378,8 @@
 							</div>
 						</div>
 
-						{#if serverProps?.default_generation_settings?.n_ctx}
-							{@render infoRow(
-								'Context Size',
-								`${formatNumber(serverProps.default_generation_settings.n_ctx)} tokens`
-							)}
+						{#if contextSize !== null}
+							{@render infoRow('Context Size', `${formatNumber(contextSize)} tokens`)}
 						{:else}
 							{@render infoRow('Context Size', 'Not available', 'text-red-500')}
 						{/if}
@@ -348,6 +434,241 @@
 									<pre class="font-mono text-xs whitespace-pre">{serverProps.chat_template}</pre>
 								</div>
 							</div>
+						{/if}
+					</div>
+				{:else}
+					<!-- OpenAI-compatible backend (e.g. vllm): no /props, so show what the
+					     model entry itself advertises (modalities, context window, capabilities) -->
+					<Table.Root class="hidden table-fixed md:table">
+						<Table.Header>
+							<Table.Row>
+								<Table.Head class="w-[10rem]">Model</Table.Head>
+
+								<Table.Head>
+									<div class="flex min-w-0 items-center gap-2">
+										<span class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap">
+											{modelName}
+										</span>
+
+										<ActionIconCopyToClipboard
+											ariaLabel="Copy model name to clipboard"
+											canCopy={!!modelName}
+											text={modelName || ''}
+										/>
+									</div>
+								</Table.Head>
+							</Table.Row>
+						</Table.Header>
+
+						<Table.Body>
+							{#if firstModel.id && firstModel.id !== modelName}
+								<Table.Row>
+									<Table.Cell class="h-10 align-middle font-medium">Model ID</Table.Cell>
+
+									<Table.Cell class="h-10 align-middle font-mono text-xs">
+										<div class="flex min-w-0 items-center gap-2">
+											<span class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap">
+												{firstModel.id}
+											</span>
+
+											<ActionIconCopyToClipboard
+												ariaLabel="Copy model ID to clipboard"
+												text={firstModel.id}
+											/>
+										</div>
+									</Table.Cell>
+								</Table.Row>
+							{/if}
+
+							<!-- Context Size -->
+							{#if contextSize !== null}
+								<Table.Row>
+									<Table.Cell class="h-10 align-middle font-medium">Context Size</Table.Cell>
+
+									<Table.Cell>{formatNumber(contextSize)} tokens</Table.Cell>
+								</Table.Row>
+							{:else}
+								<Table.Row>
+									<Table.Cell class="h-10 align-middle font-medium">Context Size</Table.Cell>
+
+									<Table.Cell class="text-muted-foreground">Not reported by this backend</Table.Cell>
+								</Table.Row>
+							{/if}
+
+							<!-- Modalities -->
+							{#if modalities.length > 0}
+								<Table.Row>
+									<Table.Cell class="align-middle font-medium">Input Modalities</Table.Cell>
+
+									<Table.Cell>
+										<div class="flex flex-wrap gap-1">
+											<BadgesModality {modalities} />
+										</div>
+									</Table.Cell>
+								</Table.Row>
+							{/if}
+
+							<!-- Capabilities advertised by the API entry -->
+							{#if capabilities.length > 0}
+								<Table.Row>
+									<Table.Cell class="align-middle font-medium">Capabilities</Table.Cell>
+
+									<Table.Cell>
+										<div class="flex flex-wrap gap-1">
+											{#each capabilities as cap (cap.key)}
+												<span
+													class="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium"
+												>
+													{cap.label}
+												</span>
+											{/each}
+										</div>
+									</Table.Cell>
+								</Table.Row>
+							{/if}
+
+							<!-- Performance of the most recent response (client-measured) -->
+							{#if lastSpeed}
+								<Table.Row>
+									<Table.Cell class="h-10 align-middle font-medium">Prefill</Table.Cell>
+
+									<Table.Cell class="h-10 align-middle">
+										<span class="font-mono text-xs">{lastSpeed.prefillMs ?? '—'}</span> ms
+										{#if lastSpeed.prefillSpeed}
+											<span class="ml-2 text-muted-foreground">
+												({lastSpeed.prefillSpeed} tok/s)
+											</span>
+										{/if}
+									</Table.Cell>
+								</Table.Row>
+							{/if}
+
+							{#if lastSpeed}
+								<Table.Row>
+									<Table.Cell class="h-10 align-middle font-medium">Prompt tokens</Table.Cell>
+
+									<Table.Cell class="h-10 align-middle">
+										<span class="font-mono text-xs">{formatNumber(lastSpeed.promptTokens ?? 0)}</span>
+									</Table.Cell>
+								</Table.Row>
+							{/if}
+
+							{#if lastSpeed}
+								<Table.Row>
+									<Table.Cell class="h-10 align-middle font-medium">Output tokens</Table.Cell>
+
+									<Table.Cell class="h-10 align-middle">
+										<span class="font-mono text-xs">{formatNumber(lastSpeed.outputTokens ?? 0)}</span>
+									</Table.Cell>
+								</Table.Row>
+							{/if}
+
+							{#if lastSpeed?.genSpeed}
+								<Table.Row>
+									<Table.Cell class="h-10 align-middle font-medium">Generation speed</Table.Cell>
+
+									<Table.Cell class="h-10 align-middle">
+										<span class="font-mono text-xs">{lastSpeed.genSpeed}</span> tok/s
+									</Table.Cell>
+								</Table.Row>
+							{/if}
+
+							<!-- Backend -->
+							{#if firstModel.ownedBy}
+								<Table.Row>
+									<Table.Cell class="align-middle font-medium">Backend</Table.Cell>
+
+									<Table.Cell class="align-middle capitalize">{firstModel.ownedBy}</Table.Cell>
+								</Table.Row>
+							{/if}
+						</Table.Body>
+					</Table.Root>
+
+					<!-- Mobile: stacked layout -->
+					<div class="flex min-w-0 flex-col gap-4 md:hidden">
+						<div class="min-w-0 space-y-1">
+							<div class="text-xs font-medium text-muted-foreground">Model</div>
+
+							<div class="flex min-w-0 items-start gap-2">
+								<span class="min-w-0 flex-1 break-all font-mono text-xs">{modelName}</span>
+
+								<ActionIconCopyToClipboard
+									ariaLabel="Copy model name to clipboard"
+									canCopy={!!modelName}
+									text={modelName || ''}
+								/>
+							</div>
+						</div>
+
+						{#if firstModel.id && firstModel.id !== modelName}
+							<div class="min-w-0 space-y-1">
+								<div class="text-xs font-medium text-muted-foreground">Model ID</div>
+
+								<div class="flex min-w-0 items-start gap-2">
+									<span class="min-w-0 flex-1 break-all font-mono text-xs">{firstModel.id}</span>
+
+									<ActionIconCopyToClipboard
+										ariaLabel="Copy model ID to clipboard"
+										text={firstModel.id}
+									/>
+								</div>
+							</div>
+						{/if}
+
+						{#if contextSize !== null}
+							{@render infoRow('Context Size', `${formatNumber(contextSize)} tokens`)}
+						{:else}
+							{@render infoRow('Context Size', 'Not reported by this backend')}
+						{/if}
+
+						{#if modalities.length > 0}
+							<div class="min-w-0 space-y-1">
+								<div class="text-xs font-medium text-muted-foreground">Input Modalities</div>
+
+								<div class="flex flex-wrap gap-1">
+									<BadgesModality {modalities} />
+								</div>
+							</div>
+						{/if}
+
+						{#if capabilities.length > 0}
+							<div class="min-w-0 space-y-1">
+								<div class="text-xs font-medium text-muted-foreground">Capabilities</div>
+
+								<div class="flex flex-wrap gap-1">
+									{#each capabilities as cap (cap.key)}
+										<span
+											class="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium"
+										>
+											{cap.label}
+										</span>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
+						{#if lastSpeed}
+							<div class="min-w-0 space-y-1">
+								<div class="text-xs font-medium text-muted-foreground">Prefill (last response)</div>
+
+								<div class="font-mono text-xs">
+									{lastSpeed.prefillMs ?? '—'} ms
+									{#if lastSpeed.prefillSpeed}
+										<span class="text-muted-foreground"> ({lastSpeed.prefillSpeed} tok/s)</span>
+									{/if}
+								</div>
+							</div>
+
+							{@render infoRow('Prompt tokens', formatNumber(lastSpeed.promptTokens ?? 0))}
+							{@render infoRow('Output tokens', formatNumber(lastSpeed.outputTokens ?? 0))}
+
+							{#if lastSpeed.genSpeed}
+								{@render infoRow('Generation speed', `${lastSpeed.genSpeed} tok/s`)}
+							{/if}
+						{/if}
+
+						{#if firstModel.ownedBy}
+							{@render infoRow('Backend', firstModel.ownedBy, 'capitalize')}
 						{/if}
 					</div>
 				{/if}

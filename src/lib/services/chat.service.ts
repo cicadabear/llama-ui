@@ -8,7 +8,7 @@
 
 import { getAudioInputFormat } from '../utils/audio-format';
 import { capImageDataURLSize } from '../utils/cap-img-size';
-import { recordSpeed, clearSpeed } from '$lib/hooks/speed-meter';
+import { recordSpeed, clearSpeed, ttft$ } from '$lib/hooks/speed-meter';
 import { getApiBase } from '../utils/api-base';
 import {
 	API_CHAT,
@@ -469,9 +469,11 @@ export class ChatService {
 		let lastContentAt: number | null = null;
 		let contentDeltaCount = 0;
 		let completionTokens: number | undefined;
+		let promptTokens: number | undefined;
 		const ttftBaseMs = clientStartMs ?? (typeof performance !== 'undefined' ? performance.now() : 0);
 		// hide any previous readout until this reply completes
 		clearSpeed();
+		ttft$.set(null);
 		// each resume must produce at least one byte to be retried again
 		// if a resume returns 200 but yields nothing, we abandon
 		// since the session has a bounded size, the total number of retries is bounded by construction
@@ -648,8 +650,10 @@ export class ChatService {
 								const timings = parsed.timings;
 								const promptProgress = parsed.prompt_progress;
 								const chunkModel = ChatService.extractModelName(parsed);
-								const parsedUsage = (parsed as { usage?: { completion_tokens?: number } }).usage;
+								const parsedUsage = (parsed as { usage?: { completion_tokens?: number; prompt_tokens?: number } })
+									.usage;
 								if (parsedUsage?.completion_tokens !== undefined) completionTokens = parsedUsage.completion_tokens;
+								if (parsedUsage?.prompt_tokens !== undefined) promptTokens = parsedUsage.prompt_tokens;
 
 								if (chunkModel && !modelEmitted) {
 									modelEmitted = true;
@@ -675,7 +679,12 @@ export class ChatService {
 									aggregatedContent += content;
 
 									const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-									if (firstContentAt === null) firstContentAt = now;
+									if (firstContentAt === null) {
+										firstContentAt = now;
+										// surface the time-to-first-token immediately, not
+										// only when the reply finishes
+										ttft$.set(firstContentAt - ttftBaseMs);
+									}
 									lastContentAt = now;
 									contentDeltaCount++;
 
@@ -691,7 +700,10 @@ export class ChatService {
 									// count reasoning tokens for TTFT / throughput as well,
 									// so reasoning models (vllm delta.reasoning) measure correctly
 									const nowR = typeof performance !== 'undefined' ? performance.now() : Date.now();
-									if (firstContentAt === null) firstContentAt = nowR;
+									if (firstContentAt === null) {
+										firstContentAt = nowR;
+										ttft$.set(firstContentAt - ttftBaseMs);
+									}
 									lastContentAt = nowR;
 									contentDeltaCount++;
 
@@ -781,12 +793,15 @@ export class ChatService {
 				if (firstContentAt !== null && lastContentAt !== null) {
 					const tokens = completionTokens ?? contentDeltaCount;
 					const genMs = lastContentAt - firstContentAt;
+					const ttftMs = firstContentAt - ttftBaseMs;
 
 					recordSpeed({
 						atMs: typeof performance !== 'undefined' ? performance.now() : Date.now(),
-						ttftMs: firstContentAt - ttftBaseMs,
+						ttftMs,
 						genMs,
 						tokens,
+						promptTokens,
+						prefillTokPerSec: promptTokens && ttftMs > 0 ? promptTokens / (ttftMs / 1000) : undefined,
 						genTokPerSec: genMs > 0 ? tokens / (genMs / 1000) : undefined,
 						model: streamModel ?? undefined
 					});

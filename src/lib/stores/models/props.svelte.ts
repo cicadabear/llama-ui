@@ -195,7 +195,16 @@ export class ModelPropsManager {
 		const props = this.getModelProps(modelId);
 		const nCtx = props?.default_generation_settings?.n_ctx;
 
-		return typeof nCtx === 'number' ? nCtx : null;
+		if (typeof nCtx === 'number') return nCtx;
+
+		// Fallback: an OpenAI-compatible backend (e.g. vllm) has no /props, so
+		// take the context size the model entry itself advertised
+		// (`max_model_len` / `context_window`).
+		const option = this.host.models.find(
+			(m) => m.model === modelId || m.id === modelId
+		);
+
+		return option?.maxModelLen ?? null;
 	}
 
 	getModelModalities(modelId: string): ModelModalities | null {

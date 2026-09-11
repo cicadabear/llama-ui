@@ -23,13 +23,22 @@ export class ModelsService {
 	private static readonly SSE_RECONNECT_MS = 1000;
 
 	/**
+	 * Read a model entry's status value, tolerating entries that carry no
+	 * `status` object (plain OpenAI-compatible backends like vllm never
+	 * report one).
+	 */
+	private static statusValue(model: ApiModelDataEntry): ServerModelStatus | undefined {
+		return model.status?.value;
+	}
+
+	/**
 	 * Check if a model is loaded based on its metadata.
 	 *
 	 * @param model - Model data entry from the API response
 	 * @returns True if the model status is LOADED
 	 */
 	static isModelLoaded(model: ApiModelDataEntry): boolean {
-		return model.status.value === ServerModelStatus.LOADED;
+		return this.statusValue(model) === ServerModelStatus.LOADED;
 	}
 
 	/**
@@ -47,7 +56,7 @@ export class ModelsService {
 	 * @returns True if the model status is LOADING
 	 */
 	static isModelLoading(model: ApiModelDataEntry): boolean {
-		return model.status.value === ServerModelStatus.LOADING;
+		return this.statusValue(model) === ServerModelStatus.LOADING;
 	}
 
 	/**

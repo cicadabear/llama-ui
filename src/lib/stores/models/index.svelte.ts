@@ -8,7 +8,7 @@
  */
 
 import { FAVORITE_MODELS_LOCALSTORAGE_KEY } from '$lib/constants';
-import { ServerModelStatus } from '$lib/enums';
+import { FileTypeCategory, ServerModelStatus } from '$lib/enums';
 import { ModelsService } from '$lib/services/models.service';
 // direct imports between stores, not via the barrel, to avoid circular deps
 import { conversationsStore } from '$lib/stores/conversations/index.svelte';
@@ -71,8 +71,8 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 		return this.routerModels
 			.filter(
 				(m) =>
-					m.status.value === ServerModelStatus.LOADED ||
-					m.status.value === ServerModelStatus.SLEEPING
+					m.status?.value === ServerModelStatus.LOADED ||
+					m.status?.value === ServerModelStatus.SLEEPING
 			)
 			.map((m) => m.id);
 	}
@@ -256,7 +256,7 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 	getModelStatus(modelId: string): ServerModelStatus | null {
 		const model = this.routerModels.find((m) => m.id === modelId);
 
-		return model?.status.value ?? null;
+		return model?.status?.value ?? null;
 	}
 
 	hasModel(modelName: string): boolean {
@@ -271,8 +271,8 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 		const model = this.routerModels.find((m) => m.id === modelId);
 
 		return (
-			model?.status.value === ServerModelStatus.LOADED ||
-			model?.status.value === ServerModelStatus.SLEEPING
+			model?.status?.value === ServerModelStatus.LOADED ||
+			model?.status?.value === ServerModelStatus.SLEEPING
 		);
 	}
 
@@ -369,24 +369,92 @@ class ModelsStore implements ModelPropsHost, ModelStatusHost {
 		return response.data.map((item: ApiModelDataEntry, index: number) => {
 			const details = response.models?.[index];
 			const rawCapabilities = Array.isArray(details?.capabilities) ? details?.capabilities : [];
-			const displayNameSource =
-				details?.name && details.name.trim().length > 0 ? details.name : item.id;
+			const displayName =
+				item.display_name && item.display_name.trim().length > 0
+					? item.display_name
+					: details?.name && details.name.trim().length > 0
+						? details.name
+						: item.id;
 			const modelId = details?.model || item.id;
+			const maxModelLen = this.parseModelContextLength(item);
+			const openaiCapabilities =
+				item.capabilities && typeof item.capabilities === 'object' ? item.capabilities : undefined;
 
 			return {
 				aliases: item.aliases ?? [],
 				capabilities: rawCapabilities.filter((value: unknown): value is string => Boolean(value)),
 				description: details?.description,
+				displayName,
 				details: details?.details,
 				id: item.id,
+				maxModelLen,
 				meta: item.meta ?? null,
-				modalities: this.props.buildArchitectureModalities(item.architecture),
+				modalities: this.buildEntryModalities(item, this.props),
 				model: modelId,
-				name: this.toDisplayName(displayNameSource),
+				name: this.toDisplayName(displayName),
+				openaiCapabilities,
+				ownedBy: typeof item.owned_by === 'string' && item.owned_by ? item.owned_by : undefined,
 				parsedId: ModelsService.parseModelId(modelId),
 				tags: item.tags ?? []
 			};
 		});
+	}
+
+	/**
+	 * Read a model entry's declared input modalities into the {vision,audio,video}
+	 * flag object. llama.cpp reports them under `architecture.input_modalities`;
+	 * a plain OpenAI-compatible backend (e.g. vllm) reports them as
+	 * `input_modalities` / `modalities.input`. Returns undefined when the entry
+	 * advertises no input modalities at all (a llama.cpp entry with no
+	 * `architecture` and no OpenAI fields), so the caller can keep its fallback.
+	 */
+	private buildEntryModalities(
+		item: ApiModelDataEntry,
+		props: ModelsStore['props']
+	): ModelModalities | undefined {
+		const inputs = this.entryInputModalities(item);
+
+		if (inputs.length === 0) {
+			return props.buildArchitectureModalities(item.architecture);
+		}
+
+		return {
+			audio: inputs.includes(FileTypeCategory.AUDIO),
+			video: inputs.includes(FileTypeCategory.VIDEO),
+			vision: inputs.includes(FileTypeCategory.IMAGE)
+		};
+	}
+
+	/**
+	 * Collect the input-modality strings a model entry advertises, in priority
+	 * order: the OpenAI-standard `input_modalities`, then the nested
+	 * `modalities.input`, then llama.cpp's `architecture.input_modalities`.
+	 */
+	private entryInputModalities(item: ApiModelDataEntry): string[] {
+		const sources = [
+			item.input_modalities,
+			item.modalities?.input,
+			item.architecture?.input_modalities
+		];
+
+		for (const source of sources) {
+			if (Array.isArray(source) && source.length > 0) return source;
+		}
+
+		return [];
+	}
+
+	/**
+	 * Read the model's maximum context length in tokens from an OpenAI-compatible
+	 * entry (`max_model_len`, falling back to `context_window` /
+	 * `context_length`). Returns null when the entry reports none.
+	 */
+	private parseModelContextLength(item: ApiModelDataEntry): number | null {
+		for (const value of [item.max_model_len, item.context_window, item.context_length]) {
+			if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+		}
+
+		return null;
 	}
 
 	/** Fetch models in MODEL mode (single model, standard OpenAI-compatible). */

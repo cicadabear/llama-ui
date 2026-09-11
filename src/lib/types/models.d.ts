@@ -14,9 +14,17 @@ export interface ModelOption {
 	id: string;
 	name: string;
 	model: string;
+	/** Human-friendly display name from the API entry (e.g. vllm `display_name`); falls back to `name` */
+	displayName?: string;
 	description?: string;
 	capabilities: string[];
+	/** Feature booleans advertised by an OpenAI-compatible entry (e.g. vllm `capabilities`); empty for llama.cpp */
+	openaiCapabilities?: Record<string, boolean>;
+	/** Backend/owner name from the API entry (e.g. `vllm`, `llamacpp`) */
+	ownedBy?: string;
 	modalities?: ModelModalities;
+	/** Maximum context window in tokens, from the API entry (e.g. vllm `max_model_len`) */
+	maxModelLen?: number;
 	details?: ApiModelDetails['details'];
 	meta?: ApiModelDataEntry['meta'];
 	parsedId?: ParsedModelId;

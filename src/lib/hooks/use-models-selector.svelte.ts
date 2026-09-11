@@ -155,6 +155,15 @@ export function useModelsSelector(opts: UseModelsSelectorOptions): UseModelsSele
 			const displayModel = serverModel || currentModel;
 
 			if (displayModel) {
+				// Prefer the real option so its modalities / context / display
+				// name surface in the selector (e.g. the vision badge) even for
+				// OpenAI-compatible backends; fall back to a synthetic row.
+				const match = options.find(
+					(o) => o.model === displayModel || o.id === displayModel
+				);
+
+				if (match) return match;
+
 				return {
 					capabilities: [],
 					id: serverModel ? 'current' : 'offline-current',

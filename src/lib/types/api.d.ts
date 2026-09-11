@@ -92,8 +92,8 @@ export interface ApiModelDataEntry {
 	in_cache: boolean;
 	/** Path to model manifest file */
 	path: string;
-	/** Current status of the model */
-	status: ApiModelStatus;
+	/** Current status of the model (llama.cpp only; absent on plain OpenAI backends) */
+	status?: ApiModelStatus;
 	/** Alternative names that resolve to this model */
 	aliases?: string[];
 	/** Informational tags for this model */
@@ -102,6 +102,20 @@ export interface ApiModelDataEntry {
 	architecture?: ApiModelArchitecture;
 	/** Legacy meta field (may be present in older responses) */
 	meta?: Record<string, unknown> | null;
+	/** OpenAI-compatible entry fields (vllm and others); absent on llama.cpp */
+	max_model_len?: number;
+	max_tokens?: number;
+	context_window?: number;
+	context_length?: number;
+	display_name?: string;
+	/** Accepted input modalities, e.g. `["text", "image"]` */
+	input_modalities?: string[];
+	/** Produced output modalities, e.g. `["text"]` */
+	output_modalities?: string[];
+	/** Nested modality capabilities, e.g. `{"input": ["text", "image"], "output": ["text"]}` */
+	modalities?: ApiModelModalities;
+	/** Capability booleans, e.g. `{"vision": true, "tools": true, "reasoning": true}` */
+	capabilities?: Record<string, boolean>;
 }
 
 /**
@@ -111,6 +125,16 @@ export interface ApiModelDataEntry {
 export interface ApiModelArchitecture {
 	/** Accepted input modalities, always contains "text" */
 	input_modalities: string[];
+}
+
+/**
+ * Modalities a model accepts/produces, as advertised by an
+ * OpenAI-compatible backend on the model entry (e.g. vllm:
+ * `{"input": ["text", "image"], "output": ["text"]}`).
+ */
+export interface ApiModelModalities {
+	input?: string[];
+	output?: string[];
 }
 
 /**

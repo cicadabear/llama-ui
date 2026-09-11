@@ -181,12 +181,6 @@
 		</div>
 	{/if}
 
-	{#if isLastAssistantMessage}
-		<div class="my-2 flex items-center gap-2">
-			<SpeedMeter />
-		</div>
-	{/if}
-
 	{#if message.timestamp && !editCtx.isEditing}
 		<ChatMessageActionIcons
 			actionsPosition="left"

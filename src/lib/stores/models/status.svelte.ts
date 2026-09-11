@@ -246,7 +246,7 @@ export class ModelStatusManager {
 
 		const current = this.host.routerModels[idx];
 
-		if (current.status.value === status) return;
+		if (current.status?.value === status) return;
 
 		const next = [...this.host.routerModels];
 
